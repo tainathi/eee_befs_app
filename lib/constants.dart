@@ -1,0 +1,1 @@
+const int kSampRate = 50; // Hz - approximate sampling rate of acceleration data

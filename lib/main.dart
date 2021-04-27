@@ -4,8 +4,11 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:sensors/sensors.dart';
+import 'package:flutter_sensors/flutter_sensors.dart';
 import 'package:eee_befs_app/LineObject.dart';
+import 'package:eee_befs_app/constants.dart';
+
+
 
 void main() {
   runApp(MyApp());
@@ -34,7 +37,9 @@ class MainPage extends StatefulWidget {
 
 class _MainPageState extends State<MainPage> {
   int _counter = 0;
-  StreamSubscription<AccelerometerEvent>? accStream; // variable used to store subscriptions to the acceleration stream
+  bool _accelAvailable = false;  // check for whether accelerometer is present in the user device
+  StreamSubscription? _accelSubscription; // variable managing subscription to the stream receiving acc data
+  final Float32x4List _accelData = Float32x4List(kSampRate); // Number of time samples to include in the list
   final double maxWidth = window.physicalSize.width /
       window.devicePixelRatio; // maximal number of logical pixels (width: vertical orientation)
   final double maxHeight = window.physicalSize.height /
@@ -43,8 +48,12 @@ class _MainPageState extends State<MainPage> {
   final Stopwatch timeStamps = Stopwatch();
   final ByteData rawPoints = ByteData(100 * 4);
 
+
   @override
   void initState() {
+    SensorManager()
+        .isSensorAvailable(Sensors.ACCELEROMETER)
+        .then((result)=> setState(() => _accelAvailable = result));
     _lineObject.addAxisSize(maxWidth, maxHeight); // setting dimensions for the line object
     super.initState();
   }
@@ -53,8 +62,7 @@ class _MainPageState extends State<MainPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
+        toolbarHeight: maxHeight/8,
         title: Text(widget.title),
       ),
       body: OrientationBuilder(
@@ -63,13 +71,16 @@ class _MainPageState extends State<MainPage> {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                CustomPaint(
-                  painter: LineDrawer(rawPoints: rawPoints.buffer.asFloat32List()),
-                  child: Container(
-                    height: maxHeight / 3,
-                    // color: Colors.black,
+                Container(
+                  color: Colors.black,
+                  height: maxHeight/2-maxHeight/8,
+                  child: ClipRect(
+                    child: CustomPaint(
+                      painter: LineDrawer(rawPoints: rawPoints.buffer.asFloat32List()),
+                    ),
                   ),
                 ),
+
               ],
             );
           else
@@ -85,24 +96,20 @@ class _MainPageState extends State<MainPage> {
   }
 
   void startRetrievingAccData() {
-    if (timeStamps.isRunning) {
-      timeStamps.stop(); // stop timer
-      accStream?.cancel(); // start listening to the acceleration stream
+    if (_accelSubscription != null){
+      _accelSubscription?.cancel();
+      _accelSubscription = null;
+      timeStamps.stop();
     } else {
-      timeStamps.start(); // start timer
-      accStream = accelerometerEvents.listen((event) {
-        // start listening to the acceleration stream
-        rawPoints.setFloat32(_counter * 8, _counter*maxWidth/49,Endian.little);
-        rawPoints.setFloat32(_counter * 8 + 4, event.z/9.81*maxHeight/10 + maxHeight/2,Endian.little); // loss of precision as x is a double
-        print("counter: $_counter [${event.z} ${rawPoints.getFloat32(_counter * 8+4,Endian.little)- maxHeight/2}]");
-        if (_counter == 49) {
-          _counter = 0;
-          setState(() {
-            // _lineObject.updateRawPoints(rawPoints.buffer.asFloat32List());
-          });
-        } else
-          ++_counter;
-      });
+      if(!timeStamps.isRunning) timeStamps.start(); // start time event
+      SensorManager().sensorUpdates(
+        sensorId: Sensors.ACCELEROMETER,
+        interval: Sensors.SENSOR_DELAY_FASTEST, // This should correspond to ~50 Hz sampling rate
+      ).then((value) => _accelSubscription = value.listen((SensorEvent event) {
+        print(event.accuracy);
+        _accelData[_counter] = Float32x4(event.data[0],event.data[1],event.data[2],21);
+        _counter == kSampRate ? _counter = 0 : ++_counter; // incrementing or reseting counter
+      }));
     }
   }
 }
