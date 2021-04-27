@@ -1,4 +1,11 @@
+import 'dart:async';
+import 'dart:typed_data';
+import 'dart:ui';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:sensors/sensors.dart';
+import 'package:eee_befs_app/LineObject.dart';
 
 void main() {
   runApp(MyApp());
@@ -10,104 +17,143 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // Try running your application with "flutter run". You'll see the
-        // application has a blue toolbar. Then, without quitting the app, try
-        // changing the primarySwatch below to Colors.green and then invoke
-        // "hot reload" (press "r" in the console where you ran "flutter run",
-        // or simply save your changes to "hot reload" in a Flutter IDE).
-        // Notice that the counter didn't reset back to zero; the application
-        // is not restarted.
-        primarySwatch: Colors.blue,
-      ),
-      home: MyHomePage(title: 'Flutter Demo Home Page'),
+      theme: ThemeData.dark(),
+      home: MainPage(title: 'Flutter Demo Home Page'),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  MyHomePage({Key key, this.title}) : super(key: key);
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
+class MainPage extends StatefulWidget {
+  MainPage({Key? key, required this.title}) : super(key: key);
 
   final String title;
 
   @override
-  _MyHomePageState createState() => _MyHomePageState();
+  _MainPageState createState() => _MainPageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
+class _MainPageState extends State<MainPage> {
   int _counter = 0;
+  StreamSubscription<AccelerometerEvent>? accStream; // variable used to store subscriptions to the acceleration stream
+  final double maxWidth = window.physicalSize.width /
+      window.devicePixelRatio; // maximal number of logical pixels (width: vertical orientation)
+  final double maxHeight = window.physicalSize.height /
+      window.devicePixelRatio; // maximal number of logical pixels (height: vertical orientation)
+  final LineObject _lineObject = LineObject();
+  final Stopwatch timeStamps = Stopwatch();
+  final ByteData rawPoints = ByteData(100 * 4);
 
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
+  @override
+  void initState() {
+    _lineObject.addAxisSize(maxWidth, maxHeight); // setting dimensions for the line object
+    super.initState();
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
         // Here we take the value from the MyHomePage object that was created by
         // the App.build method, and use it to set our appbar title.
         title: Text(widget.title),
       ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Invoke "debug painting" (press "p" in the console, choose the
-          // "Toggle Debug Paint" action from the Flutter Inspector in Android
-          // Studio, or the "Toggle Debug Paint" command in Visual Studio Code)
-          // to see the wireframe for each widget.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            Text(
-              'You have pushed the button this many times:',
-            ),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headline4,
-            ),
-          ],
-        ),
+      body: OrientationBuilder(
+        builder: (BuildContext context, Orientation orientation) {
+          if (orientation == Orientation.portrait)
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                CustomPaint(
+                  painter: LineDrawer(rawPoints: rawPoints.buffer.asFloat32List()),
+                  child: Container(
+                    height: maxHeight / 3,
+                    // color: Colors.black,
+                  ),
+                ),
+              ],
+            );
+          else
+            return Container();
+        },
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
+        onPressed: startRetrievingAccData,
         tooltip: 'Increment',
         child: Icon(Icons.add),
       ), // This trailing comma makes auto-formatting nicer for build methods.
     );
   }
+
+  void startRetrievingAccData() {
+    if (timeStamps.isRunning) {
+      timeStamps.stop(); // stop timer
+      accStream?.cancel(); // start listening to the acceleration stream
+    } else {
+      timeStamps.start(); // start timer
+      accStream = accelerometerEvents.listen((event) {
+        // start listening to the acceleration stream
+        rawPoints.setFloat32(_counter * 8, _counter*maxWidth/49,Endian.little);
+        rawPoints.setFloat32(_counter * 8 + 4, event.z/9.81*maxHeight/10 + maxHeight/2,Endian.little); // loss of precision as x is a double
+        print("counter: $_counter [${event.z} ${rawPoints.getFloat32(_counter * 8+4,Endian.little)- maxHeight/2}]");
+        if (_counter == 49) {
+          _counter = 0;
+          setState(() {
+            // _lineObject.updateRawPoints(rawPoints.buffer.asFloat32List());
+          });
+        } else
+          ++_counter;
+      });
+    }
+  }
 }
+
+class LineDrawer extends CustomPainter {
+  LineDrawer({required this.rawPoints});
+
+  Float32List rawPoints;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    var paint = Paint()
+      ..color = Colors.white
+      ..strokeWidth = 4
+      ..strokeCap = StrokeCap.round;
+
+    canvas.drawRawPoints(PointMode.polygon, rawPoints, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) {
+    return false;
+  }
+}
+
+// method used to estimate the average sampling rate of acceleration data retrieving
+// void getAverageSamplingRate() {
+//   final List<int> firstSamples = []; // variable created with the goal of knowing the sampling frequency of acceleration data
+//
+//   timeStamps.start(); // initialize the timer
+//   if (accStream == null) // start listening to the acceleration stream
+//     accStream =
+//         accelerometerEvents.listen((event) => setState(() {
+//           firstSamples.add(DateTime.now().millisecond);
+//           print(DateTime.now().millisecond);
+//         }));
+//
+//   // set a timer, during which acceleration time stamps will be stored
+//   Timer(
+//     Duration(seconds: 2), // after the first 2 s
+//         () => accStream?.cancel().then((value) {
+//       // stop listening to the stream
+//       accStream = null; // set it back to null
+//       timeStamps.stop(); // stop the counter
+//       double sf = 0; // initialize the sampling rate value at 0
+//       for (int i = 1; i < firstSamples.length; i++) sf += (firstSamples[i] - firstSamples[i - 1]);
+//       // for used to compute the sum of sampling intervals
+//       sf = (firstSamples.length - 1) *1000/ sf; // averaging sampling rate
+//       print("N=${firstSamples.length}\n$firstSamples\nSF = $sf");
+//       firstSamples.clear();
+//       setState(() => _counter = sf);
+//     }),
+//   );
+// }
