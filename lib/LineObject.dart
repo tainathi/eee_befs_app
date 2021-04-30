@@ -6,54 +6,84 @@ import 'dart:math';
 
 class LineObject {
 
-  double xAxisSize = 0; // maximal allowed number of logical pixels (dp) along x (s)
-  double yAxisSize = 0; // maximal allowed number of logical pixels (dp) along y (s)
+  double xAxisSize; // maximal allowed number of logical pixels (dp) along x (s)
+  double yAxisSize; // maximal allowed number of logical pixels (dp) along y (s)
+  double gain = 1; // factor used to scale acceleration data (full scale)
   double gravityAcc = 9.81; // used to store gravity acceleration measured in the first second of data retrieval
-  int secondsToPlot = 10; // determines the number of samples to show
-  Float32List xRawPoints = Float32List(2);  // initialize a list of Float 32 elements with a single element
-  Float32List zRawPoints = Float32List(2);  // initialize a list of Float 32 elements with a single element
-  List<List<double>> tempData = List.generate(3, (index) => List.empty(growable: true));
-  List<List<double>> xyzData = List.generate(3, (index) => List.filled(kSampRate*2*10,0)); // List with the double of elements in each sublist wrt the previous list
+  int samplesToPlot; // determines the number of samples to show
+  late Float32List xRawPoints;  // initialize a list of Float 32 elements with a single element X axis
+  late Float32List yRawPoints;  // initialize a list of Float 32 elements with a single element Y axis
+  late Float32List zRawPoints;  // initialize a list of Float 32 elements with a single element Z axis
+  late Float32x4List tempData;
+  List<bool> showXYZ = [false, false, false]; // determines whether to show each of the three axes
+  List<List<double>> xyzData = List.generate(3, (index) => List.filled(kSampRate*2*1,0)); // List with the double of elements in each sublist wrt the previous list
 
+  LineObject({required this.samplesToPlot,required this.xAxisSize, required this.yAxisSize}){
+    xRawPoints = Float32List(samplesToPlot*2);
+    yRawPoints = Float32List(samplesToPlot*2);
+    zRawPoints = Float32List(samplesToPlot*2);
+    tempData = Float32x4List(samplesToPlot);
+
+    // initialize the x and y values for the acceleration data to plot
+    for(int i=0; i<samplesToPlot; i++){
+      xRawPoints[i*2] = i * xAxisSize / (samplesToPlot-1);
+      yRawPoints[i*2] = i * xAxisSize / (samplesToPlot-1);
+      zRawPoints[i*2] = i * xAxisSize / (samplesToPlot-1);
+      xRawPoints[i*2+1] = yAxisSize / 2;
+      yRawPoints[i*2+1] = yAxisSize / 2;
+      zRawPoints[i*2+1] = yAxisSize / 2;
+    }
+  }
+
+  // Todo: update this method to update axes size rather than initialize the object
   // method to set the maximal possible logical pixel dimensions
   void initializeLineObject(double maxWidth, double maxHeight){
     xAxisSize = maxWidth; // Axis size in x direction will be dictated by the width of the target device
     yAxisSize = maxHeight; // Axis size in y direction will be dictated by the height of the target device
   }
 
-  void updateRawPoints(List<List<double>> newRawPoints) {
+  void updateRawPoints(Float32x4List newRawPoints) {
 
-    // print(tempData.first.length);
-    if (tempData.first.length>=kSampRate*secondsToPlot){ // remove samples if the requested window is shorter than that currently shown for
-      tempData[0].removeRange(0,kSampRate); // x acceleration data
-      tempData[1].removeRange(0,kSampRate); // y acceleration data
-      tempData[2].removeRange(0,kSampRate); // z acceleration data
-    }
-    tempData[0].addAll(newRawPoints[0]); // concatenating new x accel data at the beginning of the list
-    tempData[1].addAll(newRawPoints[1]); // concatenating new y accel data at the beginning of the list
-    tempData[2].addAll(newRawPoints[2]); // concatenating new z accel data at the beginning of the list
-    // print(tempData.first.length);
+    if (tempData.length>kSampRate)
+      // the next command shifts all blocks of kSampRate data to the beginning
+      tempData.setRange(0, tempData.length-kSampRate, tempData.getRange(kSampRate, tempData.length));
 
+    // setting the new batch of data to the last  kSampRate samples
+    tempData.setRange(tempData.length-kSampRate, tempData.length, newRawPoints);
 
     for (int i = 0; i < tempData.length; i++) {
-      // creating list with samples and x acceleration data
-      xyzData[0][i * 2] = i * xAxisSize / (kSampRate*secondsToPlot-1);
-      xyzData[0][i * 2 + 1] = tempData[0][i] * 0.5 * yAxisSize / gravityAcc + yAxisSize/2;
-      // creating list with samples and z acceleration data
-      xyzData[2][i * 2] = i * xAxisSize / (kSampRate*secondsToPlot-1);
-      xyzData[2][i * 2 + 1] = tempData[2][i] * 0.5 * yAxisSize / gravityAcc + yAxisSize/2;
+      xRawPoints[i*2+1] = (tempData[i].x/(gain*gravityAcc) + 1) * yAxisSize/2;
+      yRawPoints[i*2+1] = (tempData[i].y/(gain*gravityAcc) + 1) * yAxisSize/2;
+      zRawPoints[i*2+1] = (tempData[i].z/(gain*gravityAcc) + 1) * yAxisSize/2;
     }
-    xRawPoints = Float32List.fromList(xyzData[0]);
-    zRawPoints = Float32List.fromList(xyzData[2]);
   }
 
+  // method used to update the number of samples to show
+  void updateNumberOfSamplesToPlot(int newNumberOfSamples){
+    xRawPoints = Float32List(newNumberOfSamples*2);
+    yRawPoints = Float32List(newNumberOfSamples*2);
+    zRawPoints = Float32List(newNumberOfSamples*2);
+    tempData = Float32x4List(newNumberOfSamples);
+
+    // initialize the x and y values for the accelration data to plot
+    for(int i=0; i<newNumberOfSamples; i++){
+      xRawPoints[i*2] = i * xAxisSize / (newNumberOfSamples-1);
+      yRawPoints[i*2] = i * xAxisSize / (newNumberOfSamples-1);
+      zRawPoints[i*2] = i * xAxisSize / (newNumberOfSamples-1);
+      xRawPoints[i*2+1] = yAxisSize / 2;
+      yRawPoints[i*2+1] = yAxisSize / 2;
+      zRawPoints[i*2+1] = yAxisSize / 2;
+    }
+  }
+
+
   // method used to estimate gravity acceleration from the first second of data (Nilsen 1998 Clin Biomech 13:320-327)
-  void updateGravityAccValue(List<List<double>> xyzG){
+  void updateGravityAccValue(Float32x4List xyzG){
     List<double> g = [0,0,0]; // list to store the sum of acc values in the three axes
-    for (int i = 0; i < kSampRate; i++) {
-      g[0] += xyzG[0][i]/kSampRate;
-      g[1] += xyzG[1][i]/kSampRate;
-      g[2] += xyzG[2][i]/kSampRate;
+    for (int i = 0; i < xyzG.length; i++) {
+      g[0] += xyzG[i].x/xyzG.length;
+      g[1] += xyzG[i].y/xyzG.length;
+      g[2] += xyzG[i].z/xyzG.length;
     }
     gravityAcc = sqrt(g.reduce((value, element) => value*value+element*element)); // gravtity acceleration value
     print(gravityAcc);

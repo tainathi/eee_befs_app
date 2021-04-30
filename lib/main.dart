@@ -1,15 +1,13 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_sensors/flutter_sensors.dart';
 import 'package:eee_befs_app/LineObject.dart';
 import 'package:eee_befs_app/constants.dart';
 import 'package:flutter/cupertino.dart';
-
+import 'package:eee_befs_app/customised_widgets.dart';
 
 
 void main() {
@@ -42,12 +40,12 @@ class _MainPageState extends State<MainPage> {
   int _counter = 0;
   bool _accelAvailable = false;  // check for whether accelerometer is present in the user device
   StreamSubscription? _accelSubscription; // variable managing subscription to the stream receiving acc data
-  final List<List<double>> _accelData = List.generate(4, (index) => List.filled(kSampRate,0)); // creates a list where acc data will be temporarily stored
+  Float32x4List _accelData = Float32x4List(kSampRate*4); // creates a list where acc data will be temporarily stored
   final double maxWidth = window.physicalSize.width /
       window.devicePixelRatio; // maximal number of logical pixels (width: vertical orientation)
   final double maxHeight = window.physicalSize.height /
       window.devicePixelRatio; // maximal number of logical pixels (height: vertical orientation)
-  final LineObject _lineObject = LineObject();
+  late final LineObject _lineObject;
   final Stopwatch timeStamps = Stopwatch();
 
   @override
@@ -61,23 +59,21 @@ class _MainPageState extends State<MainPage> {
           sensorId: Sensors.ACCELEROMETER,  // Start listening to incoming values,
           interval: Sensors.SENSOR_DELAY_GAME, // sampling roughly 1s of data (~50 Hz sampling rate),
         ).then((value) => _accelSubscription = value.listen((SensorEvent event) { // and then estimate gravity acceleration
-          _accelData[0][_counter] = event.data[0]; // updating x accel data
-          _accelData[1][_counter] = event.data[1]; // updating y accel data
-          _accelData[2][_counter] = event.data[2]; // updating z accel data
+          _accelData[_counter] = Float32x4(event.data[0],event.data[1],event.data[2],0); // updating accel data
 
-          if(_counter == kSampRate-1){
+          if(_counter == kSampRate*4-1){
             _counter = 0;
             _lineObject.updateGravityAccValue(_accelData); // estimate gravity acceleration value
             _accelSubscription?.cancel(); // stop listening to the incoming data
             _accelSubscription = null;
+            _accelData = Float32x4List(kSampRate); // creates a list where acc data will be temporarily stored
           } else ++_counter; // incrementing or reseting counter
         }));
       }
     });
 
     // Setting size of axes of the line object
-    _lineObject.initializeLineObject(maxWidth, maxHeight*kVerticalAxisSpace); // setting dimensions for the line object
-
+    _lineObject = LineObject(samplesToPlot: kSampRate, xAxisSize: maxWidth, yAxisSize: maxHeight*kVerticalAxisSpace); // .initializeLineObject(maxWidth, maxHeight*kVerticalAxisSpace); // setting dimensions for the line object
     super.initState();
   }
 
@@ -94,10 +90,37 @@ class _MainPageState extends State<MainPage> {
           Expanded(
             child: Container(),
           ),
-          Container(
+
+          Container( // labels of settable properties
+            height: 50,
+            color: ThemeData.dark().primaryColor,
             child: Row(
               children: [
-
+                // header x axis scalling
+                Expanded(child: Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: FittedBox(fit: BoxFit.fitWidth, child: Text("Samples\nto show", textAlign: TextAlign.center,)),
+                )),
+                // header y axis scalling
+                Expanded(child: Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: FittedBox(fit: BoxFit.fitWidth,child: Text("Full scale\n(g unit)", textAlign: TextAlign.center,)),
+                )),
+                // header x, y, z, values
+                VerticalDivider(width: 0, thickness: 2, indent: 4, endIndent: 4),
+                Expanded(flex: 3, child: FittedBox(fit: BoxFit.scaleDown,child: Text("Acceleration traces\nto plot (g unit)", textAlign: TextAlign.center,)))
+              ],
+            ),
+          ),
+          Container(
+            color: Colors.black,
+            child: Row(
+              children: [
+                ScrollItemSelection(_lineObject,kSamplesToPlot,0),
+                ScrollItemSelection(_lineObject,kAccelFullScale,1),
+                AccelValuesAndLines(_lineObject,Colors.purpleAccent,_lineObject.tempData.last.x,0),
+                AccelValuesAndLines(_lineObject,Colors.yellowAccent,_lineObject.tempData.last.y,1), // TODO: update with y value
+                AccelValuesAndLines(_lineObject,Colors.lightBlueAccent,_lineObject.tempData.last.z,2)
               ],
             ),
           ),
@@ -106,7 +129,7 @@ class _MainPageState extends State<MainPage> {
             height: maxHeight*kVerticalAxisSpace,
             child: ClipRect(
               child: CustomPaint(
-                painter: LineDrawer(rawPoints: _lineObject.zRawPoints),
+                painter: LineDrawer(lineObject: _lineObject, gridPaint: kPaintGrid),
                 // painter: LineDrawer(rawPoints: rawPoints.buffer.asFloat32List()),
               ),
             ),
@@ -135,15 +158,12 @@ class _MainPageState extends State<MainPage> {
         interval: Sensors.SENSOR_DELAY_FASTEST, // This should correspond to ~50 Hz sampling rate
       ).then((value) => _accelSubscription = value.listen((SensorEvent event) {
         // timeStamps.elapsedMilliseconds/1000
-        // print(_lineObject.xRawPoints);
-        _accelData[0][_counter] = event.data[0]; // updating x accel data
-        _accelData[1][_counter] = event.data[1]; // updating y accel data
-        _accelData[2][_counter] = event.data[2]; // updating z accel data
+        _accelData[_counter] = Float32x4(event.data[0],event.data[1],event.data[2],0); // updating accel data
         if(_counter == kSampRate-1){
-          print("x: ${event.data[0]} y: ${event.data[1]} z: ${event.data[2]}");
+//          print("x: ${event.data[0]} y: ${event.data[1]} z: ${event.data[2]}");
           _counter = 0;
           setState(() => _lineObject.updateRawPoints(_accelData));  // passing the vector with acceleration data and time stamps
-          print("x: ${_lineObject.xRawPoints.last} z: ${_lineObject.zRawPoints.last}");
+//          print("x: ${_lineObject.xRawPoints.last} z: ${_lineObject.zRawPoints.last}");
         } else ++_counter; // incrementing or resetting counter
 
       }));
@@ -151,31 +171,24 @@ class _MainPageState extends State<MainPage> {
   }
 }
 
-
-Widget ScrollItemSelection(LineObject lineObject){
-  if (Platform.isIOS)
-    return CupertinoPicker(
-      children: List.generate(kSamplesToPlot.length, (index) => Text("${kSamplesToPlot[index]} s")),
-      itemExtent: 20,
-      onSelectedItemChanged: (int value) => null,
-    );
-  else
-    return Container();//DropdownButton(items: items)
-}
-
 class LineDrawer extends CustomPainter {
-  LineDrawer({required this.rawPoints});
+  LineDrawer({required this.lineObject,required this.gridPaint});
 
-  Float32List rawPoints;
+  Paint gridPaint;
+  LineObject lineObject;
 
   @override
   void paint(Canvas canvas, Size size) {
-    var paint = Paint()
-      ..color = Colors.white
-      ..strokeWidth = 4
-      ..strokeCap = StrokeCap.round;
 
-    canvas.drawRawPoints(PointMode.polygon, rawPoints, paint);
+    canvas.drawPoints(PointMode.lines,List.generate(32, (index) => Offset(index/31*size.width,size.height/2)), gridPaint);
+    if(lineObject.showXYZ[0])
+      canvas.drawRawPoints(PointMode.polygon, lineObject.xRawPoints, kPaintAccelX);
+    if(lineObject.showXYZ[1])
+      canvas.drawRawPoints(PointMode.polygon, lineObject.yRawPoints, kPaintAccelY);
+    if(lineObject.showXYZ[2])
+      canvas.drawRawPoints(PointMode.polygon, lineObject.zRawPoints, kPaintAccelZ);
+
+
   }
 
   @override
@@ -183,33 +196,3 @@ class LineDrawer extends CustomPainter {
     return true;
   }
 }
-
-// method used to estimate the average sampling rate of acceleration data retrieving
-// void getAverageSamplingRate() {
-//   final List<int> firstSamples = []; // variable created with the goal of knowing the sampling frequency of acceleration data
-//
-//   timeStamps.start(); // initialize the timer
-//   if (accStream == null) // start listening to the acceleration stream
-//     accStream =
-//         accelerometerEvents.listen((event) => setState(() {
-//           firstSamples.add(DateTime.now().millisecond);
-//           print(DateTime.now().millisecond);
-//         }));
-//
-//   // set a timer, during which acceleration time stamps will be stored
-//   Timer(
-//     Duration(seconds: 2), // after the first 2 s
-//         () => accStream?.cancel().then((value) {
-//       // stop listening to the stream
-//       accStream = null; // set it back to null
-//       timeStamps.stop(); // stop the counter
-//       double sf = 0; // initialize the sampling rate value at 0
-//       for (int i = 1; i < firstSamples.length; i++) sf += (firstSamples[i] - firstSamples[i - 1]);
-//       // for used to compute the sum of sampling intervals
-//       sf = (firstSamples.length - 1) *1000/ sf; // averaging sampling rate
-//       print("N=${firstSamples.length}\n$firstSamples\nSF = $sf");
-//       firstSamples.clear();
-//       setState(() => _counter = sf);
-//     }),
-//   );
-// }
