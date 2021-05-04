@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 const int kSampRate = 50; // Hz - approximate sampling rate of acceleration data
-const double kVerticalAxisSpace = 0.33; // x100% of the screen to be occupied by the axis when in portrait layout
+const double kVerticalAxisSpace = 0.4; // x100% of the screen to be occupied by the axis when in portrait layout
 const int kAccBufferSize = kSampRate*20*2; // maximal number of samples to be stored for showing (*2 to account for both time and acceleration samples)
 const List<int> kSamplesToPlot = [1*kSampRate,5*kSampRate,10*kSampRate,20*kSampRate]; // Approximate time (s) to scale plot with acceleration values
 const List<int> kAccelFullScale = [1, 2, 4, 8]; // full scale of the y axis for plotting acceleration values (g unit)
