@@ -1,16 +1,16 @@
 import 'dart:typed_data';
-import 'dart:ui';
 import 'package:eee_befs_app/constants.dart';
 import 'dart:math';
 
-
-class LineObject {
+class LineAccelObject {
 
   double xAxisSize; // maximal allowed number of logical pixels (dp) along x (s)
   double yAxisSize; // maximal allowed number of logical pixels (dp) along y (s)
   double gain = 1; // factor used to scale acceleration data (full scale)
   double gravityAcc = 9.81; // used to store gravity acceleration measured in the first second of data retrieval
   int samplesToPlot; // determines the number of samples to show
+  bool running = false; // status of the object
+
   late Float32List xRawPoints;  // initialize a list of Float 32 elements with a single element X axis
   late Float32List yRawPoints;  // initialize a list of Float 32 elements with a single element Y axis
   late Float32List zRawPoints;  // initialize a list of Float 32 elements with a single element Z axis
@@ -18,7 +18,7 @@ class LineObject {
   List<bool> showXYZ = [false, false, false]; // determines whether to show each of the three axes
   List<List<double>> xyzData = List.generate(3, (index) => List.filled(kSampRate*2*1,0)); // List with the double of elements in each sublist wrt the previous list
 
-  LineObject({required this.samplesToPlot,required this.xAxisSize, required this.yAxisSize}){
+  LineAccelObject({required this.samplesToPlot,required this.xAxisSize, required this.yAxisSize}){
     xRawPoints = Float32List(samplesToPlot*2);
     yRawPoints = Float32List(samplesToPlot*2);
     zRawPoints = Float32List(samplesToPlot*2);
