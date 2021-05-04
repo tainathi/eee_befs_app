@@ -21,6 +21,10 @@ environment:
   sdk: ">=2.12.0-0 <3.0.0"
 
 dependencies:
+  permission_handler: ^7.1.0
+  http: ^0.13.3
+  connectivity: ^3.0.3
+  shared_preferences: ^2.0.5
   flutter_sensors: ^0.1.5
   #sensors: ^2.0.0
   flutter:
