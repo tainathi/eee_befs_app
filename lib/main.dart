@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui';
 import 'package:eee_befs_app/LineEnExEsObject.dart';
@@ -11,21 +12,17 @@ import 'package:flutter/cupertino.dart';
 import 'package:eee_befs_app/customised_widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:connectivity/connectivity.dart';
-import 'dart:io';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:path_provider/path_provider.dart';
+import 'WriteDataToDevice.dart';
+import 'package:flutter/services.dart';
 
 void main() async {
-
   WidgetsFlutterBinding.ensureInitialized();
-  SharedPreferences sharedPreferences = await SharedPreferences.getInstance().catchError((object)=>print(object));
-  if (!sharedPreferences.containsKey("users")) {
-    print("nothing registered");
-//    sharedPreferences.setStringList("users", ['Manfredi','Taian']);
-  //  sharedPreferences.setStringList("apiKeyRead",['6QC6TE0EWORNKY2A','3RRIVS5WF4PSCHJI']);
-   // sharedPreferences.setStringList("apiKeyWrite",['GNKIDNTGX7FG89UG','C3FJ9XWFXG9DGL9U']);
-   // sharedPreferences.setInt("selectedUser",0);
-  }
-
+  SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown])
+      .then((_) {
+    runApp(new EeeBefsApp());
+  });
+  
   runApp(EeeBefsApp());
 }
 
@@ -36,31 +33,30 @@ class EeeBefsApp extends StatelessWidget {
     return MaterialApp(
       title: 'Flutter Demo',
       theme: ThemeData.dark(),
-      home: MainPage(title: 'Flutter Demo Home Page'),
+      home: MainPage(),
     );
   }
 }
 
 class MainPage extends StatefulWidget {
-  MainPage({Key? key, required this.title}) : super(key: key);
-
-  final String title;
+  MainPage({Key? key}) : super(key: key);
 
   @override
   _MainPageState createState() => _MainPageState();
 }
 
 class _MainPageState extends State<MainPage> {
-
-  // Properties for managing Thingspeak communication
+  // Properties for managing Thingspeak communication and data storage
   final Connectivity _connectivity = Connectivity();
   final List<String> _users = [];
   final List<String> _apiKeyWrite = [];
   final List<String> _apiKeyRead = [];
   final List<bool> _selectedUser = [];
+  final WriteDataToDevice _writeDataToDevice = WriteDataToDevice();
   SharedPreferences? _sharedPreferences;
   ConnectivityResult networkStatus = ConnectivityResult.none;
   late StreamSubscription<ConnectivityResult> _connectivitySubscription;
+  Timer? _timer; // timer used to indicate the time elapsed from acquisition start
 
   // Properties for managing acceleration data retrieval and display
   int _counter = 0;
@@ -75,15 +71,23 @@ class _MainPageState extends State<MainPage> {
   final LineEnExEsObject _eeeLineObject = LineEnExEsObject();
   final Stopwatch timeStamps = Stopwatch();
 
+
   @override
   void initState() {
 
+
+    // Retrieving the directory where data will be stored
+    Platform.isAndroid
+        ? getExternalStorageDirectory().then((value) => _writeDataToDevice.setFileForDataStorage(value))
+        : getApplicationDocumentsDirectory().then((value) => _writeDataToDevice.setFileForDataStorage(value));
+
     // Checking for the existence of shared preferences
-    SharedPreferences.getInstance().then((value) => getSharedPreferences(value)).catchError((object)=>print(object));
+    SharedPreferences.getInstance().then((value) => getSharedPreferences(value)).catchError((object) => print(object));
 
     // setting methods for listening to changes in connection status
-    _connectivitySubscription = _connectivity.onConnectivityChanged.listen(_checkConnectionStatus); // _checkConnectionStatus
-    _connectivity.checkConnectivity().then((connectivityResult) => networkStatus=connectivityResult);
+    _connectivitySubscription =
+        _connectivity.onConnectivityChanged.listen(_checkConnectionStatus); // _checkConnectionStatus
+    _connectivity.checkConnectivity().then((connectivityResult) => networkStatus = connectivityResult);
 
     // check for the presence of acceleration sensor in the target device
     SensorManager().isSensorAvailable(Sensors.ACCELEROMETER).then((result) {
@@ -115,7 +119,7 @@ class _MainPageState extends State<MainPage> {
 
     // Setting size of axes of the line object
     _accLineObject =
-        LineAccelObject(samplesToPlot: kSampRate, xAxisSize: maxWidth, yAxisSize: maxHeight * kVerticalAxisSpace);
+        LineAccelObject(samplesToPlot: kSampRate, xAxisSize: maxWidth, yAxisSize: maxHeight * kVerticalAxisSpace*0.95);
     super.initState();
   }
 
@@ -124,9 +128,18 @@ class _MainPageState extends State<MainPage> {
     return Scaffold(
       resizeToAvoidBottomInset: false,
       appBar: AppBar(
-        title: Text(widget.title),
+        centerTitle: true,
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 16.0),
+            child: Tooltip(
+                message: "$networkStatus",
+                child: Icon(networkStatus==ConnectivityResult.none ? Icons.signal_wifi_off_rounded : Icons.signal_wifi_4_bar_rounded)),
+          ),
+        ],
+        title: Text("EEE BEFS"),
       ),
-      drawer: _sharedPreferences==null ? null : _accLineObject.running ? null : createDrawer(),
+      drawer: _sharedPreferences == null ? null : _accLineObject.running ? null : createDrawer(),
       body: Column(
         mainAxisAlignment: MainAxisAlignment.end,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -176,17 +189,21 @@ class _MainPageState extends State<MainPage> {
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                             children: [
-                              Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                                child: FittedBox(
-                                    fit: BoxFit.fitWidth,
-                                    child: Text(
-                                      "Cumulative, energy expenditure\nestimated (0-${_eeeLineObject.maxEEValue} kcal)",
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(color: Colors.white),
-                                    )),
+                              Expanded(
+                                flex: 1,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                                  child: FittedBox(
+                                      fit: BoxFit.fitHeight,
+                                      child: Text(
+                                        "Cumulative, energy expenditure\nestimated (0-${_eeeLineObject.maxEEValue} kcal)",
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(color: Colors.white),
+                                      )),
+                                ),
                               ),
                               Expanded(
+                                flex: 2,
                                 child: ClipRect(
                                   child: CustomPaint(
                                     painter: EnExEslLineDrawer(lineObject: _eeeLineObject),
@@ -288,10 +305,14 @@ class _MainPageState extends State<MainPage> {
                             activeColor: Colors.tealAccent.withOpacity(0.4),
                             trackColor: ThemeData.dark().secondaryHeaderColor,
                             value: _eeeLineObject.sendData,
-                            onChanged: networkStatus==ConnectivityResult.none?null:_selectedUser.isEmpty?null:(status) {
-                              _eeeLineObject.sendData = status;
-                              if (!_accLineObject.running) setState(() {});
-                            },
+                            onChanged: networkStatus == ConnectivityResult.none
+                                ? null
+                                : _selectedUser.isEmpty
+                                    ? null
+                                    : (status) {
+                                        _eeeLineObject.sendData = status;
+                                        if (!_accLineObject.running) setState(() {});
+                                      },
                           ),
                         ),
                       ],
@@ -370,49 +391,70 @@ class _MainPageState extends State<MainPage> {
           Container(
             color: Colors.black,
             height: maxHeight * kVerticalAxisSpace,
-            child: ClipRect(
-              child: CustomPaint(
-                painter: AccelLineDrawer(lineObject: _accLineObject),
-                // painter: LineDrawer(rawPoints: rawPoints.buffer.asFloat32List()),
-              ),
-            ),
+            child: Stack(
+              children: [
+                Container(
+                  height: maxHeight * kVerticalAxisSpace,
+                  width: double.infinity,
+                  child: ClipRect(
+                    child: CustomPaint(
+                      painter: AccelLineDrawer(lineObject: _accLineObject),
+                      // painter: LineDrawer(rawPoints: rawPoints.buffer.asFloat32List()),
+                    ),
+                  ),
+                ),
+                Align(
+                  alignment: Alignment.bottomLeft,
+                  child: _timer==null ? null : Container(
+                    padding: EdgeInsets.only(bottom: 16.0, left: 64.0),
+                    height: 64,
+                    width: 128,
+                    child: FittedBox(
+                        fit: BoxFit.fitHeight,
+                        child: Text("${_timer?.tick} s")),
+                  ),
+                ),
+              ]),
           ),
         ],
       ),
-      floatingActionButton: !_accelAvailable ? null
-          : Container(
-              height: 60,
-              width: !_accLineObject.running ? 60 : 120,
-              decoration: BoxDecoration(
-                color: ThemeData.dark().secondaryHeaderColor,
-                borderRadius: !_accLineObject.running ? null : BorderRadius.circular(20),
-                shape: !_accLineObject.running ? BoxShape.circle : BoxShape.rectangle,
-              ),
-              child: !_accLineObject.running
-                  ? IconButton(
-                      icon: Icon(Icons.play_arrow_rounded),
-                      onPressed:  startRetrievingAccData,
-                    )
-                  : Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-                      IconButton(
-                        icon: Icon(Icons.stop_rounded),
-                        onPressed: startRetrievingAccData,
-                      ),
-                      VerticalDivider(width: 0, thickness: 2, indent: 4, endIndent: 4),
-                      IconButton(
-                        icon: Icon(
-                          Icons.save_alt,
-                          color: Colors.redAccent,
-                        ),
-                        onPressed: () {}, // TODO: implement saving callback
-                      )
-                    ]), // This trailing comma makes auto-formatting nicer for build methods.
-            ),
+      floatingActionButton: Container(
+        height: 64,
+        width: 64,
+        decoration: BoxDecoration(
+          color: ThemeData.dark().secondaryHeaderColor,
+          shape: BoxShape.circle,
+        ),
+        child: RawMaterialButton(
+          shape: CircleBorder(),
+          highlightColor: Colors.teal,
+          child: Icon(_accLineObject.recording ? Icons.save_alt : _accLineObject.running ? Icons.stop_rounded : Icons.play_arrow_rounded,
+            color: _accLineObject.recording ? Colors.redAccent : Colors.white,
+          ),
+          onPressed: () {
+            if(_accLineObject.recording){
+              _accLineObject.recording = false;
+              _writeDataToDevice.stopAcquisition();
+              _timer?.cancel();
+              _timer=null;
+            } else
+              startRetrievingAccData();
+            },
+          onLongPress: (){
+            if(_accLineObject.running){
+              _timer = Timer.periodic(Duration(seconds: 2), (timer) {});
+              _writeDataToDevice.startAcquisition();
+              _accLineObject.recording = true;
+            }
+            },
+        ),
+      ),
     );
   }
 
   // Method managing the start and stop of acceleration sampling
   void startRetrievingAccData() {
+
     setState(() => _accLineObject.running = !_accLineObject.running);
     if (_accelSubscription != null) {
       _accelSubscription?.cancel();
@@ -423,19 +465,21 @@ class _MainPageState extends State<MainPage> {
       SensorManager()
           .sensorUpdates(
             sensorId: Sensors.ACCELEROMETER,
-            interval: Sensors.SENSOR_DELAY_FASTEST, // This should correspond to ~50 Hz sampling rate
+            interval: _accLineObject.fastestSampRate ? Sensors.SENSOR_DELAY_FASTEST : Sensors.SENSOR_DELAY_GAME, // This should correspond to ~50 Hz sampling rate
           )
           .then((value) => _accelSubscription = value.listen((SensorEvent event) {
                 // timeStamps.elapsedMilliseconds/1000
-                _accelData[_counter] = Float32x4(event.data[0], event.data[1], event.data[2], 0); // updating accel data
+                _accelData[_counter] = Float32x4(event.data[0]/_accLineObject.gravityAcc, event.data[1]/_accLineObject.gravityAcc, event.data[2]/_accLineObject.gravityAcc, timeStamps.elapsedMilliseconds/1000); // updating accel data
                 if (_counter == kSampRate - 1) {
                   _counter = 0;
                   // _eeeLineObject.sendDataToThingSpeak(); // TODO: call this method when 15 s have elapsed
-                  setState(() => _accLineObject.updateRawPoints(_accelData)); // passing the vector with acceleration data and time stamps
+                  setState(() => _accLineObject
+                      .updateRawPoints(_accelData,_writeDataToDevice.ioSink)); // passing the vector with acceleration data and time stamps
 
                 } else
                   ++_counter; // incrementing or resetting counter
-              }));
+              }),
+      );
     }
   }
 
@@ -488,37 +532,61 @@ class _MainPageState extends State<MainPage> {
   }
 
   // Method used to create the drawer
-  Align createDrawer(){
+  Align createDrawer() {
     return Align(
       alignment: Alignment.topLeft,
       child: Container(
-        height: MediaQuery.of(context).size.height/4,
+        height: MediaQuery.of(context).size.height / 3,
         child: Drawer(
             child: ListView(
-              padding: EdgeInsets.zero,
-              children: <Widget>[
-                Container(
-                  height: AppBar().preferredSize.height+MediaQuery.of(context).padding.top,
-                  child: DrawerHeader(
-                    child: Text('System Configuration',style: TextStyle(color: Colors.white),),
-                    decoration: BoxDecoration(
-                      color: Colors.black,
-                    ),
-                  ),
+          padding: EdgeInsets.zero,
+          children: <Widget>[
+            Container(
+              height: AppBar().preferredSize.height + MediaQuery.of(context).padding.top,
+              child: DrawerHeader(
+                child: Text(
+                  'System Configuration',
+                  style: TextStyle(color: Colors.white),
                 ),
-                // Hardware configuration
-                ListTile(
-                  title: Text('API Key settings'),
-                  trailing: Icon(Icons.vpn_key,color: Colors.white),
-                  onTap: (){
+                decoration: BoxDecoration(
+                  color: Colors.black,
+                ),
+              ),
+            ),
+            // Hardware configuration
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('API Key settings'),
+                  IconButton(icon: Icon(Icons.vpn_key), color: Colors.white,
+                    onPressed: () {
                     Navigator.pop(context);
                     apiKeySettings();
-                  },
+                  }),
+                ],
+              ),
+            ),
+            Divider(thickness: 2, indent: 8, endIndent: 8,),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text("Sampling rate:"),
+                  ChoiceChip(label: Text("50 Hz"), selected: !_accLineObject.fastestSampRate,
+                    onSelected: (selected)=> setState(()=>_accLineObject.fastestSampRate=!_accLineObject.fastestSampRate),
+                  ),
+                  ChoiceChip(label: Text("Fastest"), selected: _accLineObject.fastestSampRate,
+                    onSelected: (selected)=> setState(()=>_accLineObject.fastestSampRate=!_accLineObject.fastestSampRate),
+                  )
+                  ],
                 ),
-                // Visualization settings
-              ],
-            )
-        ),
+            ),
+            // Visualization settings
+          ],
+        )),
       ),
     );
   }
@@ -536,64 +604,70 @@ class _MainPageState extends State<MainPage> {
       barrierDismissible: false,
       builder: (BuildContext context) {
         return AlertDialog(
-          titleTextStyle: TextStyle(fontSize: 18,fontWeight: FontWeight.bold, color: Colors.black),
-          contentTextStyle: TextStyle(fontSize: 15,color: Colors.black),
-          title: Text('Change API Key settings', style: TextStyle(color: Colors.white),),
+          titleTextStyle: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black),
+          contentTextStyle: TextStyle(fontSize: 15, color: Colors.black),
+          title: Text(
+            'Change API Key settings',
+            style: TextStyle(color: Colors.white),
+          ),
           content: SingleChildScrollView(
             child: ListBody(
               children: <Widget>[
                 // user with valid, API Keys
                 Padding(
                   padding: const EdgeInsets.all(8.0),
-                  child: Text(_users.isEmpty ? 'Set and then add user' : 'Select user:', style: TextStyle(color: Colors.white),),
+                  child: Text(
+                    _users.isEmpty ? 'Set and then add user' : 'Select user:',
+                    style: TextStyle(color: Colors.white),
+                  ),
                 ),
                 StreamBuilder(
                     stream: controller.stream,
                     initialData: _users,
-                    builder: (BuildContext context, AsyncSnapshot<List<String>> snapshot){
+                    builder: (BuildContext context, AsyncSnapshot<List<String>> snapshot) {
                       // _users.isEmpty ? Container():
                       return Container(
                         decoration: BoxDecoration(
-                          border: Border.all(color: kThemeColor,width: 1),
+                          border: Border.all(color: kThemeColor, width: 1),
                           borderRadius: BorderRadius.all(Radius.circular(5)),
                         ),
-                        height: MediaQuery.of(context).size.height/4,
-                        width: MediaQuery.of(context).size.width/2,
+                        height: MediaQuery.of(context).size.height / 4,
+                        width: MediaQuery.of(context).size.width / 2,
                         child: ListView.separated(
                           itemCount: _users.length,
-                          itemBuilder: (context,item)=>
-                              Container(
-                                color: _selectedUser[item] ? Colors.black : ThemeData.dark().secondaryHeaderColor,
-                                child: ListTile(
-                                  dense: true,
-                                  title: Text('${snapshot.data?[item]}'),
-                                  subtitle: Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                                    children: [
-                                      Expanded(child: Text('Write API: ${_apiKeyWrite[item]}')),
-                                      Expanded(child: Text('Read API: ${_apiKeyRead[item]}')),
-                                      //TODO: add channel ID
-                                    ],
-                                  ),
-                                  trailing: IconButton(
-                                    icon: Icon(Icons.clear),
-                                    onPressed: (){
-                                      _users.removeAt(item);
-                                      _apiKeyWrite.removeAt(item);
-                                      _apiKeyRead.removeAt(item);
-                                      _selectedUser.removeAt(item);
-                                      // TODO: add channel ID
-                                      controller.add(_users);
-                                    },
-                                  ),
-                                  onTap: (){
-                                    _selectedUser.replaceRange(0, _selectedUser.length, List.generate(_selectedUser.length, (index) => false));
-                                    _selectedUser[item] = true;
-                                    controller.add(_users);
-                                  },
-                                ),
+                          itemBuilder: (context, item) => Container(
+                            color: _selectedUser[item] ? Colors.black : ThemeData.dark().secondaryHeaderColor,
+                            child: ListTile(
+                              dense: true,
+                              title: Text('${snapshot.data?[item]}'),
+                              subtitle: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                children: [
+                                  Expanded(child: Text('Write API: ${_apiKeyWrite[item]}')),
+                                  Expanded(child: Text('Read API: ${_apiKeyRead[item]}')),
+                                  //TODO: add channel ID
+                                ],
                               ),
-                          separatorBuilder: (context,item)=>Divider(height: 0),
+                              trailing: IconButton(
+                                icon: Icon(Icons.clear),
+                                onPressed: () {
+                                  _users.removeAt(item);
+                                  _apiKeyWrite.removeAt(item);
+                                  _apiKeyRead.removeAt(item);
+                                  _selectedUser.removeAt(item);
+                                  // TODO: add channel ID
+                                  controller.add(_users);
+                                },
+                              ),
+                              onTap: () {
+                                _selectedUser.replaceRange(
+                                    0, _selectedUser.length, List.generate(_selectedUser.length, (index) => false));
+                                _selectedUser[item] = true;
+                                controller.add(_users);
+                              },
+                            ),
+                          ),
+                          separatorBuilder: (context, item) => Divider(height: 0),
                         ),
                       );
                     }),
@@ -610,14 +684,17 @@ class _MainPageState extends State<MainPage> {
                     border: OutlineInputBorder(borderSide: BorderSide(color: kThemeColor)),
                   ),
                   keyboardType: TextInputType.text,
-                  onChanged: (value)=> value.length<1 ? tempApiKeyWrite = null : tempApiKeyWrite=value,
+                  onChanged: (value) => value.length < 1 ? tempApiKeyWrite = null : tempApiKeyWrite = value,
                 ),
                 SizedBox(height: 10),
 
                 // User API Key for reading to be added
                 Padding(
                   padding: const EdgeInsets.all(8.0),
-                  child: Text('Enter API key for reading:', style: TextStyle(color: Colors.white),),
+                  child: Text(
+                    'Enter API key for reading:',
+                    style: TextStyle(color: Colors.white),
+                  ),
                 ),
                 TextFormField(
                   maxLines: 1,
@@ -626,7 +703,7 @@ class _MainPageState extends State<MainPage> {
                     border: OutlineInputBorder(borderSide: BorderSide(color: kThemeColor)),
                   ),
                   keyboardType: TextInputType.text,
-                  onChanged: (value)=> value.length<1 ? tempApiKeyRead = null : tempApiKeyRead =value,
+                  onChanged: (value) => value.length < 1 ? tempApiKeyRead = null : tempApiKeyRead = value,
                 ),
                 SizedBox(height: 10),
 
@@ -644,27 +721,26 @@ class _MainPageState extends State<MainPage> {
                             border: OutlineInputBorder(borderSide: BorderSide(color: kThemeColor)),
                           ),
                           keyboardType: TextInputType.text,
-                          onChanged: (value) => value.length<1 ? tempUser=null : tempUser=value,
+                          onChanged: (value) => value.length < 1 ? tempUser = null : tempUser = value,
                         ),
                       ),
                       Expanded(
                         flex: 1,
                         child: Container(
-                          decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: kThemeColor
-                          ),
+                          decoration: BoxDecoration(shape: BoxShape.circle, color: kThemeColor),
                           child: RawMaterialButton(
                             shape: CircleBorder(),
-                            child: Icon(Icons.add,color: Colors.white),
-                            onPressed: (){
-                              if(tempUser==null||tempApiKeyRead==null||tempApiKeyWrite==null){
-                                return;}
-                              _users.add(tempUser??"");
-                              _apiKeyRead.add(tempApiKeyRead??"");
-                              _apiKeyWrite.add(tempApiKeyWrite??"");
-                              if(_selectedUser.isNotEmpty)
-                                _selectedUser.replaceRange(0, _selectedUser.length, List.generate(_selectedUser.length, (index) => false));
+                            child: Icon(Icons.add, color: Colors.white),
+                            onPressed: () {
+                              if (tempUser == null || tempApiKeyRead == null || tempApiKeyWrite == null) {
+                                return;
+                              }
+                              _users.add(tempUser ?? "");
+                              _apiKeyRead.add(tempApiKeyRead ?? "");
+                              _apiKeyWrite.add(tempApiKeyWrite ?? "");
+                              if (_selectedUser.isNotEmpty)
+                                _selectedUser.replaceRange(
+                                    0, _selectedUser.length, List.generate(_selectedUser.length, (index) => false));
                               _selectedUser.add(true);
                               print(_selectedUser);
                               print(_users);
@@ -685,15 +761,17 @@ class _MainPageState extends State<MainPage> {
           actions: <Widget>[
             // Confirm deletion button
             FlatButton(
-              child: Text('Done',style: TextStyle(fontWeight: FontWeight.w900,color: kThemeColor)),
-              onPressed: _users.isEmpty ? () => Navigator.pop(context) : () async {
-                await _sharedPreferences?.setStringList("users",_users);
-                await _sharedPreferences?.setStringList("apiKeyRead",_apiKeyRead);
-                await _sharedPreferences?.setStringList("apiKeyWrite",_apiKeyWrite);
-                await _sharedPreferences?.setInt("selectedUser",_selectedUser.indexOf(true));
-                _eeeLineObject.apiKeyWrite = _apiKeyWrite[_selectedUser.indexOf(true)];
-                setState(()=>Navigator.pop(context));
-              },
+              child: Text('Done', style: TextStyle(fontWeight: FontWeight.w900, color: kThemeColor)),
+              onPressed: _users.isEmpty
+                  ? () => Navigator.pop(context)
+                  : () async {
+                      await _sharedPreferences?.setStringList("users", _users);
+                      await _sharedPreferences?.setStringList("apiKeyRead", _apiKeyRead);
+                      await _sharedPreferences?.setStringList("apiKeyWrite", _apiKeyWrite);
+                      await _sharedPreferences?.setInt("selectedUser", _selectedUser.indexOf(true));
+                      _eeeLineObject.apiKeyWrite = _apiKeyWrite[_selectedUser.indexOf(true)];
+                      setState(() => Navigator.pop(context));
+                    },
             ),
             // Cancel deletion
           ],
@@ -703,31 +781,29 @@ class _MainPageState extends State<MainPage> {
   }
 
   // Method for getting any shared preferences
-  void getSharedPreferences(SharedPreferences sharedPreferences){
+  void getSharedPreferences(SharedPreferences sharedPreferences) {
     // Assigning api keys from the list in shared preferences
-    if (sharedPreferences.containsKey("users")){
-      _users.addAll(sharedPreferences.getStringList("users")?? []);
-      _apiKeyRead.addAll(sharedPreferences.getStringList("apiKeyRead")?? []);
-      _apiKeyWrite.addAll(sharedPreferences.getStringList("apiKeyWrite")?? []);
+    if (sharedPreferences.containsKey("users")) {
+      _users.addAll(sharedPreferences.getStringList("users") ?? []);
+      _apiKeyRead.addAll(sharedPreferences.getStringList("apiKeyRead") ?? []);
+      _apiKeyWrite.addAll(sharedPreferences.getStringList("apiKeyWrite") ?? []);
       _selectedUser.addAll(List.generate(_users.length, (index) => false));
       int? user = sharedPreferences.getInt("selectedUser");
 
-      if(user!=null){
+      if (user != null) {
         _eeeLineObject.apiKeyWrite = _apiKeyWrite[user];
-        user >= _selectedUser.length ? _selectedUser.first = true :
-        _selectedUser[user]=true;
+        user >= _selectedUser.length ? _selectedUser.first = true : _selectedUser[user] = true;
       }
-     }
-    setState(()=>_sharedPreferences=sharedPreferences);
+    }
+    setState(() => _sharedPreferences = sharedPreferences);
   }
 
   // method for updating connection status upon connection changes
   void _checkConnectionStatus(ConnectivityResult connectivityResult) {
     print(connectivityResult);
     // TODO: update this for iOS (see https://github.com/johnwargo/flutter-android-connectivity-permissions/blob/master/lib/main.dart)
-    setState(()=> networkStatus = connectivityResult);
+    setState(() => networkStatus = connectivityResult);
   }
-
 }
 
 class AccelLineDrawer extends CustomPainter {
@@ -739,6 +815,7 @@ class AccelLineDrawer extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     canvas.drawPoints(
         PointMode.lines, List.generate(32, (index) => Offset(index / 31 * size.width, size.height / 2)), kPaintGrid);
+
     if (lineObject.showXYZ[0]) canvas.drawRawPoints(PointMode.polygon, lineObject.xRawPoints, kPaintAccelX);
     if (lineObject.showXYZ[1]) canvas.drawRawPoints(PointMode.polygon, lineObject.yRawPoints, kPaintAccelY);
     if (lineObject.showXYZ[2]) canvas.drawRawPoints(PointMode.polygon, lineObject.zRawPoints, kPaintAccelZ);
@@ -779,3 +856,12 @@ class EnExEslLineDrawer extends CustomPainter {
     return true;
   }
 }
+
+
+
+// fid = fopen('2021-05-06_09-04-12.fta','r');
+// data = fread(fid,[1 inf],'uint8');
+// fclose all
+//
+// d  = typecast(uint8(data),'single');
+// d = reshape(d,4,prod(size(d))/4)';

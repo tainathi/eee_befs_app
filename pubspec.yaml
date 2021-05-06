@@ -21,6 +21,7 @@ environment:
   sdk: ">=2.12.0-0 <3.0.0"
 
 dependencies:
+  path_provider: ^2.0.1
   permission_handler: ^7.1.0
   http: ^0.13.3
   connectivity: ^3.0.3

@@ -57,7 +57,7 @@ Widget AccelValuesAndLines(LineAccelObject lineObject, Color buttonColor,double 
         color: buttonColor.withOpacity(lineObject.showXYZ[axisId]?1:0.4),
         child: FittedBox(
             fit: BoxFit.fill,
-            child: Text("${axisId==0?"X":axisId==1?"Y":"Z"}: ${(gValue/lineObject.gravityAcc).toStringAsFixed(1)}",
+            child: Text("${axisId==0?"X":axisId==1?"Y":"Z"}: ${(gValue).toStringAsFixed(1)}",
               style: TextStyle(color: lineObject.showXYZ[axisId]?Colors.black:Colors.white),
             ),
         ),
