@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'dart:typed_data';
+import 'package:eee_befs_app/WriteDataToDevice.dart';
 import 'package:eee_befs_app/constants.dart';
 import 'dart:math';
 
@@ -9,7 +11,9 @@ class LineAccelObject {
   double gain = 1; // factor used to scale acceleration data (full scale)
   double gravityAcc = 9.81; // used to store gravity acceleration measured in the first second of data retrieval
   int samplesToPlot; // determines the number of samples to show
+  int elapsedTime = 0;
   bool running = false; // status of the object
+  bool recording = false; // whether data should be saved to device
 
   late Float32List xRawPoints;  // initialize a list of Float 32 elements with a single element X axis
   late Float32List yRawPoints;  // initialize a list of Float 32 elements with a single element Y axis
@@ -35,14 +39,8 @@ class LineAccelObject {
     }
   }
 
-  // Todo: update this method to update axes size rather than initialize the object
-  // method to set the maximal possible logical pixel dimensions
-  void initializeLineObject(double maxWidth, double maxHeight){
-    xAxisSize = maxWidth; // Axis size in x direction will be dictated by the width of the target device
-    yAxisSize = maxHeight; // Axis size in y direction will be dictated by the height of the target device
-  }
 
-  void updateRawPoints(Float32x4List newRawPoints) {
+  void updateRawPoints(Float32x4List newRawPoints, IOSink? ioSink) {
 
     if (tempData.length>kSampRate)
       // the next command shifts all blocks of kSampRate data to the beginning
@@ -52,10 +50,13 @@ class LineAccelObject {
     tempData.setRange(tempData.length-kSampRate, tempData.length, newRawPoints);
 
     for (int i = 0; i < tempData.length; i++) {
-      xRawPoints[i*2+1] = (tempData[i].x/(gain*gravityAcc) + 1) * yAxisSize/2;
-      yRawPoints[i*2+1] = (tempData[i].y/(gain*gravityAcc) + 1) * yAxisSize/2;
-      zRawPoints[i*2+1] = (tempData[i].z/(gain*gravityAcc) + 1) * yAxisSize/2;
+      xRawPoints[i*2+1] = (tempData[i].x/gain + 1) * yAxisSize/2;
+      yRawPoints[i*2+1] = (tempData[i].y/gain + 1) * yAxisSize/2;
+      zRawPoints[i*2+1] = (tempData[i].z/gain + 1) * yAxisSize/2;
     }
+
+    if (recording)
+      ioSink?.add(newRawPoints.buffer.asByteData().buffer.asUint8List());
   }
 
   // method used to update the number of samples to show
@@ -76,7 +77,6 @@ class LineAccelObject {
     }
   }
 
-
   // method used to estimate gravity acceleration from the first second of data (Nilsen 1998 Clin Biomech 13:320-327)
   void updateGravityAccValue(Float32x4List xyzG){
     List<double> g = [0,0,0]; // list to store the sum of acc values in the three axes
@@ -88,4 +88,5 @@ class LineAccelObject {
     gravityAcc = sqrt(g.reduce((value, element) => value*value+element*element)); // gravtity acceleration value
     print(gravityAcc);
   }
+
 }
