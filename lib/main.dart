@@ -15,6 +15,7 @@ import 'package:connectivity/connectivity.dart';
 import 'package:path_provider/path_provider.dart';
 import 'WriteDataToDevice.dart';
 import 'package:flutter/services.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -76,10 +77,11 @@ class _MainPageState extends State<MainPage> {
   void initState() {
 
 
-    // Retrieving the directory where data will be stored
-    Platform.isAndroid
-        ? getExternalStorageDirectory().then((value) => _writeDataToDevice.setFileForDataStorage(value))
-        : getApplicationDocumentsDirectory().then((value) => _writeDataToDevice.setFileForDataStorage(value));
+    _writeDataToDevice.setFileForDataStorage();
+    // // Retrieving the directory where data will be stored
+    // Platform.isAndroid
+    //     ? getExternalStorageDirectory().then((value) => _writeDataToDevice.setFileForDataStorage(value))
+    //     : getApplicationDocumentsDirectory().then((value) => _writeDataToDevice.setFileForDataStorage(value));
 
     // Checking for the existence of shared preferences
     SharedPreferences.getInstance().then((value) => getSharedPreferences(value)).catchError((object) => print(object));
@@ -96,7 +98,7 @@ class _MainPageState extends State<MainPage> {
         SensorManager()
             .sensorUpdates(
               sensorId: Sensors.ACCELEROMETER, // Start listening to incoming values,
-              interval: Sensors.SENSOR_DELAY_FASTEST, // sampling roughly 1s of data (~50 Hz sampling rate),
+              interval: Sensors.SENSOR_DELAY_GAME, // sampling roughly 1s of data (~50 Hz sampling rate),
             )
             .then((value) => _accelSubscription = value.listen((SensorEvent event) {
                   // and then estimate gravity acceleration
@@ -418,7 +420,7 @@ class _MainPageState extends State<MainPage> {
           ),
         ],
       ),
-      floatingActionButton: Container(
+      floatingActionButton: !_accelAvailable ? null : Container(
         height: 64,
         width: 64,
         decoration: BoxDecoration(
@@ -442,7 +444,7 @@ class _MainPageState extends State<MainPage> {
             },
           onLongPress: (){
             if(_accLineObject.running){
-              _timer = Timer.periodic(Duration(seconds: 2), (timer) {});
+              _timer = Timer.periodic(Duration(seconds: 1), (timer) {});
               _writeDataToDevice.startAcquisition();
               _accLineObject.recording = true;
             }
@@ -470,6 +472,7 @@ class _MainPageState extends State<MainPage> {
           .then((value) => _accelSubscription = value.listen((SensorEvent event) {
                 // timeStamps.elapsedMilliseconds/1000
                 _accelData[_counter] = Float32x4(event.data[0]/_accLineObject.gravityAcc, event.data[1]/_accLineObject.gravityAcc, event.data[2]/_accLineObject.gravityAcc, timeStamps.elapsedMilliseconds/1000); // updating accel data
+
                 if (_counter == kSampRate - 1) {
                   _counter = 0;
                   // _eeeLineObject.sendDataToThingSpeak(); // TODO: call this method when 15 s have elapsed

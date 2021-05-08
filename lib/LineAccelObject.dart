@@ -14,7 +14,7 @@ class LineAccelObject {
   int elapsedTime = 0;
   bool running = false; // status of the object
   bool recording = false; // whether data should be saved to device
-  bool fastestSampRate = true;
+  bool fastestSampRate = false;
 
   late Float32List xRawPoints;  // initialize a list of Float 32 elements with a single element X axis
   late Float32List yRawPoints;  // initialize a list of Float 32 elements with a single element Y axis
