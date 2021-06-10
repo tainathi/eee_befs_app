@@ -14,7 +14,10 @@ class LineAccelObject {
   int elapsedTime = 0;
   bool running = false; // status of the object
   bool recording = false; // whether data should be saved to device
-  bool fastestSampRate = false;
+<<<<<<<<< Temporary merge branch 1
+=========
+  bool fastestSampRate = true;
+>>>>>>>>> Temporary merge branch 2
 
   late Float32List xRawPoints;  // initialize a list of Float 32 elements with a single element X axis
   late Float32List yRawPoints;  // initialize a list of Float 32 elements with a single element Y axis
@@ -55,7 +58,10 @@ class LineAccelObject {
       yRawPoints[i*2+1] = (tempData[i].y/gain + 1) * yAxisSize/2;
       zRawPoints[i*2+1] = (tempData[i].z/gain + 1) * yAxisSize/2;
     }
+<<<<<<<<< Temporary merge branch 1
+=========
     // print("${tempData.last.z} ${tempData.last.y} $gravityAcc");
+>>>>>>>>> Temporary merge branch 2
 
     if (recording)
       ioSink?.add(newRawPoints.buffer.asByteData().buffer.asUint8List());
