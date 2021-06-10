@@ -1,6 +1,6 @@
 # eee_befs_app
 
-App used for imlementing features dealt with during the BEFS course - Politecnico di Torino
+App used for recording acceleration data and to implement features dealt with during the BEFS course - Politecnico di Torino
 
 ## Getting Started
 
